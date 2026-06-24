@@ -6,19 +6,6 @@ from gym_microrts.envs.vec_env import MicroRTSGridModeVecEnv
 # if you want to record videos, install stable-baselines3 and use its `VecVideoRecorder`
 # from stable_baselines3.common.vec_env import VecVideoRecorder
 
-
-envs = MicroRTSGridModeVecEnv(
-    num_selfplay_envs=2,
-    num_bot_envs=1,
-    max_steps=2000,
-    render_theme=2,
-    ai2s=[microrts_ai.coacAI for _ in range(1)],
-    map_paths=["maps/16x16/basesWorkers16x16.xml"],
-    reward_weight=np.array([10.0, 1.0, 1.0, 0.2, 1.0, 4.0]),
-)
-# envs = VecVideoRecorder(envs, 'videos', record_video_trigger=lambda x: x % 4000 == 0, video_length=2000)
-
-
 def softmax(x, axis=None):
     x = x - x.max(axis=axis, keepdims=True)
     y = np.exp(x)
@@ -33,9 +20,25 @@ def sample(logits):
     choices = (u < c).argmax(axis=1)
     return choices.reshape(-1, 1)
 
+envs = MicroRTSGridModeVecEnv(
+    num_selfplay_envs=2,
+    num_bot_envs=1,
+    max_steps=2000,
+    render_theme=2,
+    ai2s=[microrts_ai.coacAI for _ in range(1)],
+    map_paths=["maps/16x16/basesWorkers16x16.xml"],
+    reward_weight=np.array([10.0, 1.0, 1.0, 0.2, 1.0, 4.0]),
+)
+# envs = VecVideoRecorder(envs, 'videos', record_video_trigger=lambda x: x % 4000 == 0, video_length=2000)
 
+print("Creating MicroRTS environment...")
 envs.action_space.seed(0)
-envs.reset()
+obs, info = envs.reset()
+print(f"Environment reset successfully")
+print(f"Observation shape: {obs.shape}")
+print(f"Action space: {envs.action_space}")
+print(f"Map size: {envs.height}x{envs.width}")
+
 nvec = envs.action_space.nvec
 
 for i in range(10000):
@@ -59,5 +62,20 @@ for i in range(10000):
     )
     # doing the following could result in invalid actions
     # action = np.array([envs.action_space.sample()])
-    next_obs, reward, done, info = envs.step(action)
+    next_obs, reward, terminated, truncated, info = envs.step(action)
+    done = terminated | truncated
+
+    if i % 100 == 0:
+        print(f"\nStep {i}")
+        print(f"Reward: {reward}")
+        print(f"Terminated: {terminated}")
+        print(f"Truncated: {truncated}")
+        print(f"Action shape: {action.shape}")
+
+    if np.any(done):
+        print(f"Episode finished at step {i}")
+        print(f"Final reward: {reward}")
 envs.close()
+print("Finished running random agent")
+envs.close()
+print("Environment closed")

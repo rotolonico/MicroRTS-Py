@@ -6,7 +6,7 @@ import warnings
 import xml.etree.ElementTree as ET
 from itertools import cycle
 
-import gym
+import gymnasium as gym
 import jpype
 import jpype.imports
 import numpy as np
@@ -31,7 +31,7 @@ as an example.
 
 
 class MicroRTSGridModeVecEnv:
-    metadata = {"render.modes": ["human", "rgb_array"], "video.frames_per_second": 150}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 150}
     """
     [[0]x_coordinate*y_coordinate(x*y), [1]a_t(6), [2]p_move(4), [3]p_harvest(4), 
     [4]p_return(4), [5]p_produce_direction(4), [6]p_produce_unit_type(z), 
@@ -49,7 +49,7 @@ class MicroRTSGridModeVecEnv:
         render_theme=2,
         frame_skip=0,
         ai2s=[],
-        map_paths=["maps/10x10/basesTwoWorkers10x10.xml"],
+        map_paths=["maps/10x10/basesWorkers10x10.xml"],
         reward_weight=np.array([0.0, 1.0, 0.0, 0.0, 0.0, 5.0]),
         cycle_maps=[],
         autobuild=True,
@@ -187,11 +187,11 @@ class MicroRTSGridModeVecEnv:
         # get the unit type table
         self.utt = json.loads(str(self.render_client.sendUTT()))
 
-    def reset(self):
+    def reset(self, *, seed=None, options=None):
         responses = self.vec_client.reset([0] * self.num_envs)
         obs = [self._encode_obs(np.array(ro)) for ro in responses.observation]
 
-        return np.array(obs)
+        return np.array(obs), {}
 
     def _encode_obs(self, obs):
         obs = obs.reshape(len(obs), -1).clip(0, np.array([self.num_planes]).T - 1)
@@ -244,7 +244,9 @@ class MicroRTSGridModeVecEnv:
                         p1_response = self.vec_client.selfPlayClients[done_idx // 2].getResponse(1)
                         obs[done_idx] = self._encode_obs(np.array(p0_response.observation))
                         obs[done_idx + 1] = self._encode_obs(np.array(p1_response.observation))
-        return np.array(obs), reward @ self.reward_weight, done[:, 0], infos
+        terminated = done[:, 0]
+        truncated = np.zeros_like(terminated, dtype=bool)
+        return np.array(obs), reward @ self.reward_weight, terminated, truncated, infos
 
     def step(self, ac):
         self.step_async(ac)
@@ -292,7 +294,7 @@ class MicroRTSGridModeVecEnv:
 
 
 class MicroRTSBotVecEnv(MicroRTSGridModeVecEnv):
-    metadata = {"render.modes": ["human", "rgb_array"], "video.frames_per_second": 150}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 150}
 
     def __init__(
         self,
@@ -411,10 +413,10 @@ class MicroRTSBotVecEnv(MicroRTSGridModeVecEnv):
         # get the unit type table
         self.utt = json.loads(str(self.render_client.sendUTT()))
 
-    def reset(self):
+    def reset(self, *, seed=None, options=None):
         responses = self.vec_client.reset([0 for _ in range(self.num_envs)])
         raw_obs, reward, done, info = np.ones((self.num_envs, 2)), np.array(responses.reward), np.array(responses.done), {}
-        return raw_obs
+        return raw_obs, {}
 
     def step_async(self, actions):
         self.actions = actions
@@ -423,7 +425,9 @@ class MicroRTSBotVecEnv(MicroRTSGridModeVecEnv):
         responses = self.vec_client.gameStep(self.actions, [0 for _ in range(self.num_envs)])
         raw_obs, reward, done = np.ones((self.num_envs, 2)), np.array(responses.reward), np.array(responses.done)
         infos = [{"raw_rewards": item} for item in reward]
-        return raw_obs, reward @ self.reward_weight, done[:, 0], infos
+        terminated = done[:, 0]
+        truncated = np.zeros_like(terminated, dtype=bool)
+        return raw_obs, reward @ self.reward_weight, terminated, truncated, infos
 
 
 class MicroRTSGridModeSharedMemVecEnv(MicroRTSGridModeVecEnv):
@@ -518,9 +522,9 @@ class MicroRTSGridModeSharedMemVecEnv(MicroRTSGridModeVecEnv):
         # get the unit type table
         self.utt = json.loads(str(self.render_client.sendUTT()))
 
-    def reset(self):
+    def reset(self, *, seed=None, options=None):
         self.vec_client.reset([0] * self.num_envs)
-        return self.obs
+        return self.obs, {}
 
     def step_async(self, actions):
         actions = actions.reshape((self.num_envs, self.width * self.height, self.action_dim))
@@ -549,7 +553,9 @@ class MicroRTSGridModeSharedMemVecEnv(MicroRTSGridModeVecEnv):
                         # self.vec_client.selfPlayClients[done_idx // 2].reset()
                         # self.obs[done_idx] = self._encode_obs(np.array(p0_response.observation))
                         # self.obs[done_idx + 1] = self._encode_obs(np.array(p1_response.observation))
-        return self.obs, reward @ self.reward_weight, done[:, 0], infos
+        terminated = done[:, 0]
+        truncated = np.zeros_like(terminated, dtype=bool)
+        return self.obs, reward @ self.reward_weight, terminated, truncated, infos
 
     def get_action_mask(self):
         self.vec_client.getMasks(0)

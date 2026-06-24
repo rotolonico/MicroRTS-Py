@@ -8,12 +8,25 @@ import time
 from distutils.util import strtobool
 from typing import List
 
+
+# --- Helper functions for Gymnasium API compatibility ---
+def unwrap_reset(reset_result):
+    return reset_result[0] if isinstance(reset_result, tuple) else reset_result
+
+
+def unwrap_step(step_result):
+    if len(step_result) == 5:
+        obs, rewards, terminated, truncated, infos = step_result
+        dones = np.logical_or(terminated, truncated)
+        return obs, rewards, dones, infos
+    return step_result
+
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from gym.spaces import MultiDiscrete
+from gymnasium.spaces import MultiDiscrete
 from stable_baselines3.common.vec_env import VecEnvWrapper, VecMonitor, VecVideoRecorder
 from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
@@ -114,14 +127,15 @@ class MicroRTSStatsRecorder(VecEnvWrapper):
         self.gamma = gamma
 
     def reset(self):
-        obs = self.venv.reset()
+        reset_result = self.venv.reset()
+        obs = unwrap_reset(reset_result)
         self.raw_rewards = [[] for _ in range(self.num_envs)]
         self.ts = np.zeros(self.num_envs, dtype=np.float32)
         self.raw_discount_rewards = [[] for _ in range(self.num_envs)]
         return obs
 
     def step_wait(self):
-        obs, rews, dones, infos = self.venv.step_wait()
+        obs, rews, dones, infos = unwrap_step(self.venv.step_wait())
         newinfos = list(infos[:])
         for i in range(len(dones)):
             self.raw_rewards[i] += [infos[i]["raw_rewards"]]
@@ -348,7 +362,11 @@ if __name__ == "__main__":
         envs = VecVideoRecorder(
             envs, f"videos/{experiment_name}", record_video_trigger=lambda x: x % 100000 == 0, video_length=2000
         )
-    assert isinstance(envs.action_space, MultiDiscrete), "only MultiDiscrete action space is supported"
+    print(f"Action space type: {type(envs.action_space)}")
+    print(f"Action space: {envs.action_space}")
+    assert isinstance(envs.action_space, MultiDiscrete) or envs.action_space.__class__.__name__ == "MultiDiscrete", (
+        "only MultiDiscrete action space is supported"
+    )
 
     eval_executor = None
     if args.max_eval_workers > 0:
@@ -379,7 +397,8 @@ if __name__ == "__main__":
     start_time = time.time()
     # Note how `next_obs` and `next_done` are used; their usage is equivalent to
     # https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/blob/84a7582477fb0d5c82ad6d850fe476829dddd2e1/a2c_ppo_acktr/storage.py#L60
-    next_obs = torch.Tensor(envs.reset()).to(device)
+    reset_result = envs.reset()
+    next_obs = torch.Tensor(unwrap_reset(reset_result)).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
 
     # CRASH AND RESUME LOGIC:
@@ -431,10 +450,10 @@ if __name__ == "__main__":
             actions[step] = action
             logprobs[step] = logproba
             try:
-                next_obs, rs, ds, infos = envs.step(action.cpu().numpy().reshape(envs.num_envs, -1))
-                next_obs = torch.Tensor(next_obs).to(device)
+                next_obs, rs, ds, infos = unwrap_step(envs.step(action.cpu().numpy().reshape(envs.num_envs, -1)))
+                next_obs = torch.Tensor(unwrap_reset(next_obs)).to(device)
             except Exception as e:
-                e.printStackTrace()
+                print(e)
                 raise
             rewards[step], next_done = torch.Tensor(rs).to(device), torch.Tensor(ds).to(device)
 

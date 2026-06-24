@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.3.1-runtime-ubuntu20.04
+FROM ubuntu:20.04
 
 # install ubuntu dependencies
 ENV DEBIAN_FRONTEND=noninteractive 
@@ -19,10 +19,10 @@ RUN poetry install
 COPY ./gym_microrts /gym_microrts
 COPY ./experiments /experiments
 RUN poetry install
-# COPY build.sh build.sh
-# RUN bash build.sh
+RUN poetry run python -m pip install gymnasium
+COPY hello_world.py hello_world.py
+COPY build.sh build.sh
 
 COPY entrypoint.sh /usr/local/bin/
 RUN chmod 777 /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-
